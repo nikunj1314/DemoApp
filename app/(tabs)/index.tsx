@@ -1,70 +1,206 @@
-import { Image, StyleSheet, Platform } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, ActivityIndicator, FlatList, StyleSheet, SafeAreaView } from 'react-native';
+import * as SQLite from 'expo-sqlite';
 
-import { HelloWave } from '@/components/HelloWave';
-import ParallaxScrollView from '@/components/ParallaxScrollView';
-import { ThemedText } from '@/components/ThemedText';
-import { ThemedView } from '@/components/ThemedView';
-
-export default function HomeScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({ ios: 'cmd + d', android: 'cmd + m' })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-        <ThemedText>
-          Tap the Explore tab to learn more about what's included in this starter app.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          When you're ready, run{' '}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
-  );
+interface Character {
+  id?: number;
+  name: string;
+  gender: string;
+  culture: string;
+  titles: string[];
 }
 
+const App: React.FC = () => {
+  const [loading, setLoading] = useState<boolean>(true);
+  const [listData, setListData] = useState<Character[]>([]);
+
+  useEffect(() => {
+    initDatabase();
+  }, []);
+
+  const initDatabase = async () => {
+    try {
+      const database = await SQLite.openDatabaseAsync('got.db');
+      await createTable(database);
+      await fetchAndStoreData(database);
+    } catch (error) {
+      console.error('Database initialization error:', error);
+      setLoading(false);
+    }
+  };
+
+  const createTable = async (database: SQLite.SQLiteDatabase) => {
+    try {
+      await database.runAsync(
+        'CREATE TABLE IF NOT EXISTS characters (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, gender TEXT, culture TEXT, titles TEXT)'
+      );
+    } catch (error) {
+      console.error('Error creating table:', error);
+    }
+  };
+
+  const storeDataInDB = async (database: { runAsync: (arg0: string, arg1: any[] | undefined) => any; }, characters: any[]) => {
+    try {
+      await database.runAsync('DELETE FROM characters');
+
+      for (const character of characters) {
+        const titlesString = character.titles ? JSON.stringify(character.titles) : JSON.stringify([]);
+
+        await database.runAsync(
+          'INSERT INTO characters (name, gender, culture, titles) VALUES (?, ?, ?, ?)',
+          [
+            character.name || '',
+            character.gender || '',
+            character.culture || '',
+            titlesString
+          ]
+        );
+      }
+    } catch (error) {
+      console.error('Error storing data:', error);
+      throw error;
+    }
+  };
+
+  const fetchDataFromDB = async (database: { getAllAsync: (arg0: string) => any; }) => {
+    try {
+      const result = await database.getAllAsync('SELECT * FROM characters');
+
+      return result.map((item: { titles: string; name: any; gender: any; culture: any; }) => ({
+        ...item,
+        titles: item.titles ? JSON.parse(item.titles) : [],
+        name: item.name || null,
+        gender: item.gender || null,
+        culture: item.culture || null
+      }));
+    } catch (error) {
+      console.error('Error fetching from DB:', error);
+      throw error;
+    }
+  };
+
+  const fetchAndStoreData = async (database: SQLite.SQLiteDatabase) => {
+    const urls = [
+      'https://anapioficeandfire.com/api/characters/300',
+      'https://anapioficeandfire.com/api/characters/301',
+      'https://anapioficeandfire.com/api/characters/302',
+      'https://anapioficeandfire.com/api/characters/303',
+    ];
+
+    try {
+      const requests = urls.map(url => fetch(url).then(res => res.json()));
+      const results: Character[] = await Promise.all(requests);
+
+      await storeDataInDB(database, results);
+
+      const storedData = await fetchDataFromDB(database);
+      setListData(storedData);
+      setLoading(false);
+    } catch (error) {
+      console.error('Error in data flow:', error);
+      setLoading(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#0000ff" />
+        <Text>Loading...</Text>
+      </View>
+    );
+  }
+
+  if (listData.length === 0) {
+    return (
+      <View style={styles.loadingContainer}>
+        <Text>No data available</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.mainContainer}>
+      <SafeAreaView />
+      <FlatList
+        data={listData}
+        keyExtractor={(item, index) => index.toString()}
+        renderItem={({ item }) => (
+          <View style={styles.itemContainer}>
+            <Text style={styles.nameText}>{item.name}</Text>
+
+            <View style={[styles.rowFlex, styles.top1]}>
+              {item.gender && <Text style={styles.infoText}>{item.gender}</Text>}
+              {item.culture && (
+                <Text style={styles.infoText}>
+                  {item.gender ? "  |  " : ""}{item.culture}
+                </Text>
+              )}
+            </View>
+
+            {item.titles && item.titles.length > 0 && (
+              <View style={[styles.rowFlex, styles.top1]}>
+                {item.titles.map((title, index) => (
+                  <View key={index} style={styles.rowFlex}>
+                    <Text style={styles.titleText}>{title}</Text>
+                    {index !== item.titles.length - 1 && (
+                      <Text style={styles.titleText}>{" | "}</Text>
+                    )}
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
+      />
+    </View>
+  );
+};
+
 const styles = StyleSheet.create({
-  titleContainer: {
+  mainContainer: {
+    flex: 1,
+    backgroundColor: '#FFFFFF'
+  },
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  itemContainer: {
+    marginHorizontal: 20,
+    padding: 20,
+    borderWidth: 1,
+    borderRadius: 8,
+    marginTop: 25,
+    borderColor: '#ddd',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  rowFlex: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    flexWrap: 'wrap'
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  top1: {
+    marginTop: 5
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  nameText: {
+    fontSize: 18,
+    fontWeight: '600'
   },
+  infoText: {
+    fontSize: 16,
+    color: 'gray'
+  },
+  titleText: {
+    fontSize: 14,
+    color: "green"
+  }
 });
+
+export default App;
